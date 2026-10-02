@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LineFour — contrary motion before the hook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink:#142018; --paper:#eef3ea; --card:#f7faf4; --line:#c9d6c4; --pine:#2f6b45; --mute:#5d6d60; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:"IBM Plex Sans", sans-serif; }
+  header { display:flex; justify-content:space-between; gap:16px; align-items:end; padding:28px 32px 12px; }
+  h1 { font-family:Fraunces, serif; font-size:42px; margin:0; letter-spacing:-0.03em; }
+  h1 span { color:var(--pine); }
+  .lede { max-width:680px; color:var(--mute); margin:6px 0 0; }
+  main { display:grid; grid-template-columns: 300px 1fr; gap:18px; padding:12px 32px 40px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; }
+  label { display:block; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--mute); margin:10px 0 4px; }
+  select, input[type=range] { width:100%; }
+  button { border:0; border-radius:999px; padding:10px 14px; font-weight:600; cursor:pointer; background:var(--ink); color:#f4faf2; }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button.on { background:var(--pine); color:#fff; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .bars { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; }
+  .bar { border:1px solid var(--line); border-radius:12px; padding:10px; background:#fff; min-height:240px; }
+  .bar.now { outline:2px solid var(--pine); }
+  .bar h3 { margin:0 0 8px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--mute); }
+  .lane { height:18px; margin:6px 0; position:relative; background:#e7eee4; border-radius:6px; }
+  .lane i { position:absolute; top:2px; height:14px; width:18%; border-radius:4px; }
+  .lane.violin i { background:#2f6b45; }
+  .lane.bass i { background:#1c140c; }
+  .lane.piano i { background:#8aa57a; }
+  .meter { height:8px; background:#e7eee4; border-radius:99px; overflow:hidden; margin-top:12px; }
+  .meter > div { height:100%; width:0; background:var(--pine); }
+  .note { font-size:13px; color:var(--mute); line-height:1.45; }
+  footer { padding:0 32px 28px; color:var(--mute); font-size:13px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } header { flex-direction:column; align-items:start; } .bars { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Line<span>Four</span></h1>
+    <p class="lede">The hook is already written. The four bars in front of it are stuck because both hands move the same way. LineFour puts a live FluidR3 violin against an upright bass so one line climbs while the other falls. Not a third stack. Not a walking chorus. Not a louder master.</p>
+  </div>
+  <div class="note">Distinct from ThirdFour, WalkFour, EarnFour, ShakeFour.</div>
+</header>
+<main>
+  <section class="panel">
+    <label>Tempo <span id="bpmLabel">92</span></label>
+    <input id="bpm" type="range" min="72" max="120" value="92" />
+    <label>Key</label>
+    <select id="key">
+      <option>C</option><option>D</option><option>Eb</option><option>F</option><option selected>G</option><option>A</option><option>Bb</option>
+    </select>
+    <label>Motion</label>
+    <div class="row">
+      <button id="modeLine" class="on" type="button">Contrary line</button>
+      <button id="modeSame" class="ghost" type="button">Same-way roots</button>
+    </div>
+    <div class="row">
+      <button id="play" type="button">Play four</button>
+      <button id="stop" class="ghost" type="button">Stop</button>
+      <button id="midi" class="ghost" type="button">Export MIDI</button>
+    </div>
+    <div class="meter"><div id="meter"></div></div>
+    <p class="note" id="status">First play loads FluidR3 violin, upright bass, piano, and woodblock. Flat note names only. Sharps are pitched from the nearest live sample.</p>
+  </section>
+  <section class="panel">
+    <div class="bars" id="bars"></div>
+    <p class="note" id="caption">Bars walk I–vi–IV–V. Contrary: violin descends while bass rises into the hook. Same-way: both sit on roots, which is why the loop never arrives.</p>
+  </section>
+</main>
+<footer>LineFour · finish the approach, then hand the hook to HookGrid · FluidR3 GM · workinwithai-create</footer>
+<script>
+const SF = "https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@gh-pages/FluidR3_GM";
+const NAMES = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
+const CHAIRS = {
+  violin: "violin-mp3",
+  bass: "acoustic_bass-mp3",
+  piano: "acoustic_grand_piano-mp3",
+  pulse: "woodblock-mp3"
+};
+const cache = new Map();
+let ctx, timer, playing = false, mode = "line";
+const barsEl = document.getElementById("bars");
+for (let i = 0; i < 4; i++) {
+  const d = document.createElement("div");
+  d.className = "bar";
+  d.innerHTML = `<h3>Bar ${i + 1}</h3>
+    <div class="lane violin" data-lane="violin"></div>
+    <div class="lane bass" data-lane="bass"></div>
+    <div class="lane piano" data-lane="piano"></div>`;
+  barsEl.appendChild(d);
+}
+document.getElementById("bpm").oninput = e => document.getElementById("bpmLabel").textContent = e.target.value;
+document.getElementById("modeLine").onclick = () => setMode("line");
+document.getElementById("modeSame").onclick = () => setMode("same");
+function setMode(m) {
+  mode = m;
+  document.getElementById("modeLine").className = m === "line" ? "on" : "ghost";
+  document.getElementById("modeSame").className = m === "same" ? "on" : "ghost";
+  paintLanes();
+}
+function noteName(midi) {
+  const n = ((midi % 12) + 12) % 12;
+  const oct = Math.floor(midi / 12) - 1;
+  return NAMES[n] + oct;
+}
+function nearestFlat(midi) {
+  const n = ((midi % 12) + 12) % 12;
+  const sharpish = n === 1 || n === 3 || n === 6 || n === 8 || n === 10;
+  if (!sharpish) return midi;
+  return midi - 1;
+}
+async function sample(inst, midi) {
+  const key = inst + ":" + midi;
+  if (cache.has(key)) return cache.get(key);
+  const job = (async () => {
+    const srcMidi = nearestFlat(midi);
+    const name = noteName(srcMidi);
+    const res = await fetch(`${SF}/${inst}/${name}.mp3`);
+    if (!res.ok) throw new Error(name + " missing");
+    const arr = await ctx.decodeAudioData(await res.arrayBuffer());
+    return { buf: arr, rate: Math.pow(2, (midi - srcMidi) / 12) };
+  })();
+  cache.set(key, job);
+  return job;
+}
+function hit(when, packed, gain) {
+  if (!packed) return;
+  const src = ctx.createBufferSource();
+  src.buffer = packed.buf;
+  src.playbackRate.value = packed.rate;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(gain, when);
+  g.gain.exponentialRampToValueAtTime(0.001, when + 0.85);
+  src.connect(g); g.connect(ctx.destination);
+  src.start(when);
+  src.stop(when + 0.9);
+}
+function progression(root) {
+  return [0, 9, 5, 7].map(d => root + d);
+}
+function eventsFor() {
+  const roots = { C:60, D:62, Eb:63, F:65, G:67, A:69, Bb:70 };
+  const root = roots[document.getElementById("key").value];
+  const chords = progression(root);
+  const events = [];
+  chords.forEach((deg, bar) => {
+    const bassRoot = deg - 24;
+    const violinTop = deg + 12;
+    for (let step = 0; step < 4; step++) {
+      const walk = mode === "line" ? step : 0;
+      events.push({ bar, step, chair: "bass", midi: bassRoot + walk, gain: 0.7 });
+      events.push({ bar, step, chair: "violin", midi: violinTop - (mode === "line" ? walk * 2 : 0), gain: 0.42 });
+      if (step % 2 === 0) events.push({ bar, step, chair: "piano", midi: deg, gain: 0.28 });
+      if (step === 0) events.push({ bar, step, chair: "pulse", midi: 72, gain: 0.35 });
+    }
+  });
+  return events;
+}
+function paintLanes() {
+  const ev = eventsFor();
+  [...barsEl.children].forEach((bar, i) => {
+    ["violin","bass","piano"].forEach(lane => {
+      const el = bar.querySelector("." + lane);
+      el.innerHTML = "";
+      ev.filter(e => e.bar === i && e.chair === lane).forEach(e => {
+        const mark = document.createElement("i");
+        mark.style.left = (e.step * 25) + "%";
+        mark.title = noteName(e.midi);
+        el.appendChild(mark);
+      });
+    });
+  });
+}
+paintLanes();
+document.getElementById("key").onchange = paintLanes;
+async function play() {
+  stop();
+  ctx = new AudioContext();
+  if (ctx.state === "suspended") await ctx.resume();
+  document.getElementById("status").textContent = "Loading FluidR3 chairs…";
+  const events = eventsFor();
+  const packs = new Map();
+  for (const ev of events) {
+    const k = CHAIRS[ev.chair] + ":" + ev.midi;
+    if (!packs.has(k)) packs.set(k, sample(CHAIRS[ev.chair], ev.midi));
+  }
+  await Promise.all([...packs.values()]);
+  const bpm = +document.getElementById("bpm").value;
+  const beat = 60 / bpm;
+  const start = ctx.currentTime + 0.12;
+  playing = true;
+  for (const ev of events) {
+    const packed = await packs.get(CHAIRS[ev.chair] + ":" + ev.midi);
+    hit(start + (ev.bar * 4 + ev.step) * beat, packed, ev.gain);
+  }
+  document.getElementById("status").textContent = mode === "line"
+    ? "Contrary: violin falls, bass climbs, hook is the next downbeat."
+    : "Same-way roots: both chairs agree, so the four bars never lean.";
+  const paint = () => {
+    if (!playing) return;
+    const el = (ctx.currentTime - start) / beat / 4;
+    [...barsEl.children].forEach((node, i) => node.classList.toggle("now", i === Math.floor(el)));
+    document.getElementById("meter").style.width = Math.max(0, Math.min(100, (el / 4) * 100)) + "%";
+    if (el < 4.15) requestAnimationFrame(paint);
+  };
+  requestAnimationFrame(paint);
+  timer = setTimeout(stop, ((4 * 4 * beat) + 0.4) * 1000);
+}
+function stop() {
+  playing = false;
+  clearTimeout(timer);
+  if (ctx) ctx.close().catch(() => {});
+  ctx = null;
+  cache.clear();
+  [...barsEl.children].forEach(n => n.classList.remove("now"));
+  document.getElementById("meter").style.width = "0";
+}
+function midiBytes() {
+  const bpm = +document.getElementById("bpm").value;
+  const events = eventsFor().filter(e => e.chair !== "pulse");
+  const tpq = 480;
+  const tempo = Math.round(60000000 / bpm);
+  const body = [0x00, 0xff, 0x51, 0x03, (tempo >> 16) & 255, (tempo >> 8) & 255, tempo & 255];
+  const pushVar = (arr, v) => { let x = v; const b = [x & 0x7f]; while ((x >>= 7)) b.push((x & 0x7f) | 0x80); for (let i = b.length - 1; i >= 0; i--) arr.push(b[i]); };
+  const notes = events.map(ev => ({ tick: (ev.bar * 4 + ev.step) * tpq, note: ev.midi, ch: ev.chair === "violin" ? 1 : 0 })).sort((a,b) => a.tick - b.tick);
+  let last = 0;
+  notes.forEach(n => {
+    pushVar(body, n.tick - last); last = n.tick;
+    body.push(0x90 | n.ch, n.note, n.ch ? 78 : 90);
+    pushVar(body, tpq - 20);
+    body.push(0x80 | n.ch, n.note, 0);
+    last += tpq - 20;
+  });
+  body.push(0x00, 0xff, 0x2f, 0x00);
+  const len = body.length;
+  const hdr = [0x4d,0x54,0x68,0x64,0,0,0,6,0,1,0,1,(tpq>>8)&255,tpq&255,0x4d,0x54,0x72,0x6b,(len>>24)&255,(len>>16)&255,(len>>8)&255,len&255];
+  return new Uint8Array([...hdr, ...body]);
+}
+document.getElementById("play").onclick = () => play().catch(err => {
+  document.getElementById("status").textContent = "Playback failed: " + err.message;
+});
+document.getElementById("stop").onclick = stop;
+document.getElementById("midi").onclick = () => {
+  const bytes = midiBytes();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([bytes], { type: "audio/midi" }));
+  a.download = "linefour-contrary.mid";
+  a.click();
+};
+</script>
+</body>
+</html>
